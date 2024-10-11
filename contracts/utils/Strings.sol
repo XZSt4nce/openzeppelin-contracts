@@ -223,6 +223,8 @@ library Strings {
         return tryParseInt(input, 0, bytes(input).length);
     }
 
+    uint256 private constant ABS_MIN_INT256 = 2 ** 255;
+
     /**
      * @dev Variant of {parseInt-string-uint256-uint256} that returns false if the parsing fails because of an invalid
      * character.
@@ -240,16 +242,14 @@ library Strings {
         bool positiveSign = bytes1(buffer.unsafeReadBytesOffset(begin)) == bytes1("+");
         bool negativeSign = bytes1(buffer.unsafeReadBytesOffset(begin)) == bytes1("-");
         uint256 offset = (positiveSign || negativeSign).toUint();
-        int8 factor = negativeSign ? int8(-1) : int8(1);
 
-        int256 result = 0;
-        for (uint256 i = begin + offset; i < end; ++i) {
-            uint8 chr = _tryParseChr(buffer[i]);
-            if (chr > 9) return (false, 0);
-            result *= 10;
-            result += factor * int8(chr);
-        }
-        return (true, result);
+        (bool absSuccess, uint256 absValue) = tryParseUint(input, begin + offset, end);
+
+        if (absSuccess && absValue < ABS_MIN_INT256) {
+            return (true, negativeSign ? -int256(absValue) : int256(absValue));
+        } else if (absSuccess && negativeSign && absValue == ABS_MIN_INT256) {
+            return (true, type(int256).min);
+        } else return (false, 0);
     }
 
     /**
@@ -309,8 +309,10 @@ library Strings {
         for (uint256 i = begin + offset; i < end; ++i) {
             uint8 chr = _tryParseChr(buffer[i]);
             if (chr > 15) return (false, 0);
-            result *= 16;
-            result += chr;
+            result <<= 4;
+            unchecked {
+                result += chr;
+            }
         }
         return (true, result);
     }
@@ -356,7 +358,7 @@ library Strings {
         uint256 end
     ) internal pure returns (bool success, address value) {
         // check that input is the correct length
-        bool hasPrefix = bytes2(bytes(input).unsafeReadBytesOffset(begin)) == 0x3078;
+        bool hasPrefix = bytes2(bytes(input).unsafeReadBytesOffset(begin)) == bytes2("0x");
         uint256 expectedLength = 40 + hasPrefix.toUint() * 2;
 
         if (end - begin == expectedLength) {
